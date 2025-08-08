@@ -1,0 +1,1231 @@
+package Veidlapa;
+
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Desktop;
+import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.awt.Font;
+import java.awt.GridLayout;
+import java.awt.Toolkit;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
+import java.awt.event.KeyAdapter;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.PrintWriter;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.Vector;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+
+import javax.swing.BorderFactory;
+import javax.swing.DefaultComboBoxModel;
+import javax.swing.JButton;
+import javax.swing.JComboBox;
+import javax.swing.JComponent;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTextField;
+import javax.swing.SwingUtilities;
+import javax.swing.Timer;
+import javax.swing.UIManager;
+import javax.swing.border.Border;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
+import javax.swing.text.JTextComponent;
+
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellType;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.util.CellReference;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+
+public class MedicinasVeidlapa extends JFrame {
+
+	private static final long serialVersionUID = 1L;
+
+	private static final Path DESKTOP_PATH = Paths.get(System.getProperty("user.home"), "Desktop");
+	private static final Path BASE_DIRECTORY = DESKTOP_PATH.resolve("MedicinaSlimnicaVeidlapas");
+	private static final Path EXCEL_TEMPLATE_PATH = BASE_DIRECTORY.resolve("Medicina_slimnīcai.xlsx");
+	private static final Path OUTPUT_DIRECTORY = BASE_DIRECTORY.resolve("Izveidotās_Veidlapas");
+	private static final Path GIMENES_ARSTI_FILE = BASE_DIRECTORY.resolve("gimenes_arsti.txt");
+	private static final Path PSIHIATRI_FILE = BASE_DIRECTORY.resolve("arsti_psihiatri.txt");
+	private static final Path MEDIKAMENTI_FILE = BASE_DIRECTORY.resolve("medikamenti.txt");
+	private static final Path PREFERENCES_FILE = BASE_DIRECTORY.resolve("app_preferences.txt");
+
+	private Vector<String> medikamentiList;
+
+	private ComboBoxWithSearch activeMedikamentComboBox = null;
+
+	private JTextField vardsUzvardsField;
+	private JTextField personasKodsField;
+	private JTextField pilniGadiField;
+	private JComboBox<String> invaliditatesGrupaComboBox;
+	private JTextField iestajiesSACField;
+	private JComboBox<String> gimenesArstsComboBox;
+	private JComboBox<String> psihiatrsComboBox;
+	private ComboBoxWithSearch[] medikamentuComboBoxes;
+	private JComboBox<String> klientuSarakstsComboBox;
+
+	private JButton saveButton;
+	private JLabel statusBar;
+
+	private final Color mandatoryFieldColor = new Color(255, 255, 204);
+	private final Color errorColor = new Color(255, 204, 204);
+	private final Pattern personasKodsPattern = Pattern.compile("\\d{6}-\\d{5}");
+
+	public MedicinasVeidlapa() {
+		try {
+			UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+
+		setupApplicationFoldersAndFiles();
+
+		// Uzlabota dizaina elementi
+		Font mainFont = new Font("Segoe UI", Font.PLAIN, 16);
+		Font titleFont = new Font("Segoe UI", Font.BOLD, 22);
+		Font buttonFont = mainFont.deriveFont(Font.BOLD);
+		Color backgroundColor = new Color(245, 245, 245); // Gaiši pelēks fons
+		Color panelColor = Color.WHITE;
+		Color primaryColor = new Color(50, 150, 250); // Zils
+		Color secondaryColor = new Color(100, 200, 100); // Zaļš
+
+		UIManager.put("Label.font", mainFont);
+		UIManager.put("TextField.font", mainFont);
+		UIManager.put("ComboBox.font", mainFont);
+		UIManager.put("Button.font", buttonFont);
+		UIManager.put("TitledBorder.font", titleFont);
+		UIManager.put("Panel.background", backgroundColor);
+		UIManager.put("OptionPane.messageFont", mainFont);
+		UIManager.put("OptionPane.buttonFont", buttonFont);
+
+		setTitle("🏥 Medicīnas Veidlapa");
+		loadPreferences();
+		setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
+		setLocationRelativeTo(null);
+		setLayout(new BorderLayout(15, 15));
+		setBackground(backgroundColor);
+
+		addWindowListener(new WindowAdapter() {
+			@Override
+			public void windowClosing(WindowEvent e) {
+				int result = JOptionPane.showConfirmDialog(MedicinasVeidlapa.this,
+						"Vai tiešām vēlaties aizvērt programmu?", "Apstiprināt aizvēršanu", JOptionPane.YES_NO_OPTION);
+				if (result == JOptionPane.YES_OPTION) {
+					savePreferences();
+					dispose();
+				}
+			}
+
+			@Override
+			public void windowDeactivated(WindowEvent e) {
+				savePreferences();
+			}
+		});
+
+		statusBar = new JLabel("Gatavs.");
+		statusBar.setBorder(BorderFactory.createCompoundBorder(
+				BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(200, 200, 200)),
+				BorderFactory.createEmptyBorder(8, 10, 8, 10)));
+		statusBar.setFont(mainFont.deriveFont(Font.ITALIC, 14f));
+		statusBar.setBackground(new Color(230, 230, 230));
+		statusBar.setOpaque(true);
+
+		JPanel mainPanel = new JPanel(new BorderLayout(15, 15));
+		mainPanel.setBackground(backgroundColor);
+		mainPanel.setBorder(BorderFactory.createEmptyBorder(15, 15, 15, 15));
+
+		JPanel formPanel = new JPanel();
+		formPanel.setBackground(panelColor);
+		formPanel.setLayout(new BorderLayout(15, 15));
+
+		JPanel clientInfoPanel = createClientInfoPanel();
+		JPanel doctorsPanel = createDoctorsPanel();
+		JPanel medikamentiPanel = createMedikamentiPanel();
+
+		JPanel topSectionPanel = new JPanel(new GridLayout(2, 1, 15, 15));
+		topSectionPanel.setOpaque(false);
+		topSectionPanel.add(clientInfoPanel);
+		topSectionPanel.add(doctorsPanel);
+
+		formPanel.add(topSectionPanel, BorderLayout.NORTH);
+		formPanel.add(medikamentiPanel, BorderLayout.CENTER);
+
+		JScrollPane scrollPane = new JScrollPane(formPanel);
+		scrollPane.getVerticalScrollBar().setUnitIncrement(16);
+		scrollPane.setBorder(BorderFactory.createLineBorder(new Color(200, 200, 200), 1));
+		scrollPane.getViewport().setBackground(panelColor);
+
+		mainPanel.add(scrollPane, BorderLayout.CENTER);
+
+		JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 10));
+		buttonPanel.setBackground(backgroundColor);
+
+		JButton helpButton = new JButton("ℹ️ Palīdzība");
+		JButton saveButton = new JButton("💾 Saglabāt veidlapu");
+		JButton viewButton = new JButton("📄 Apskatīt veidlapu");
+		JButton printButton = new JButton("🖨️ Drukāt veidlapu");
+
+		setupButton(helpButton, new Color(220, 220, 220), new Color(255, 230, 150));
+		setupButton(saveButton, new Color(220, 220, 220), new Color(255, 230, 150));
+		setupButton(viewButton, new Color(220, 220, 220), new Color(255, 230, 150));
+		setupButton(printButton, new Color(220, 220, 220), new Color(255, 230, 150));
+
+		this.saveButton = saveButton;
+
+		helpButton.setFont(buttonFont);
+		helpButton.addActionListener(e -> {
+			JOptionPane.showMessageDialog(this,
+					"1. Aizpildiet visus laukus.\n" + "2. Spiediet 'Saglabāt veidlapu'.\n"
+							+ "3. Ja nepieciešams, varat drukāt vai apskatīt veidlapu.\n\n"
+							+ "Jautājumu gadījumā jautājiet vadītājam vai kolēģiem.",
+					"Palīdzība", JOptionPane.INFORMATION_MESSAGE);
+		});
+		saveButton.setFont(buttonFont);
+		saveButton.addActionListener(new SaveActionListener());
+		saveButton.setEnabled(false);
+
+		viewButton.setFont(buttonFont);
+		viewButton.addActionListener(new ViewActionListener());
+
+		printButton.setFont(buttonFont);
+		printButton.addActionListener(new PrintActionListener());
+
+		buttonPanel.add(helpButton);
+		buttonPanel.add(saveButton);
+		buttonPanel.add(viewButton);
+		buttonPanel.add(printButton);
+
+		JPanel bottomPanel = new JPanel(new BorderLayout());
+		bottomPanel.setBackground(backgroundColor);
+		bottomPanel.add(buttonPanel, BorderLayout.CENTER);
+		bottomPanel.add(statusBar, BorderLayout.SOUTH);
+
+		add(mainPanel, BorderLayout.CENTER);
+		add(bottomPanel, BorderLayout.SOUTH);
+
+		addValidationListeners();
+		checkFormValidity();
+
+		SwingUtilities.invokeLater(() -> vardsUzvardsField.requestFocusInWindow());
+	}
+
+	private void setupButton(JButton button, Color defaultColor, Color hoverColor) {
+		button.setBackground(defaultColor);
+		button.setForeground(Color.BLACK);
+		button.setFocusPainted(false);
+		button.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(new Color(150, 150, 150)),
+				BorderFactory.createEmptyBorder(8, 15, 8, 15)));
+		button.setOpaque(true);
+
+		button.addMouseListener(new MouseAdapter() {
+			@Override
+			public void mouseEntered(MouseEvent e) {
+				if (button.isEnabled()) {
+					button.setBackground(hoverColor);
+				}
+			}
+
+			@Override
+			public void mouseExited(MouseEvent e) {
+				if (button.isEnabled()) {
+					button.setBackground(defaultColor);
+				}
+			}
+		});
+	}
+
+	private void setupApplicationFoldersAndFiles() {
+		try {
+			Files.createDirectories(BASE_DIRECTORY);
+			Files.createDirectories(OUTPUT_DIRECTORY);
+
+			copyResourceToFile("Medicina_slimnīcai.xlsx", EXCEL_TEMPLATE_PATH);
+			copyResourceToFile("gimenes_arsti.txt", GIMENES_ARSTI_FILE);
+			copyResourceToFile("arsti_psihiatri.txt", PSIHIATRI_FILE);
+			copyResourceToFile("medikamenti.txt", MEDIKAMENTI_FILE);
+			copyResourceToFile("app_preferences.txt", PREFERENCES_FILE);
+
+		} catch (IOException e) {
+			e.printStackTrace();
+			JOptionPane.showMessageDialog(this,
+					"Kļūda, veidojot nepieciešamās mapes un failus uz darbvirsmas. Pārbaudiet lietotāja atļaujas.",
+					"Kļūda", JOptionPane.ERROR_MESSAGE);
+			System.exit(1);
+		}
+	}
+
+	private void copyResourceToFile(String resourceName, Path targetPath) throws IOException {
+		if (!Files.exists(targetPath)) {
+			try (InputStream in = getClass().getResourceAsStream("/Veidlapa/" + resourceName);
+					OutputStream out = new FileOutputStream(targetPath.toFile())) {
+
+				if (in == null) {
+					throw new IOException("Resurss nav atrasts: " + resourceName);
+				}
+
+				byte[] buffer = new byte[1024];
+				int length;
+				while ((length = in.read(buffer)) > 0) {
+					out.write(buffer, 0, length);
+				}
+			}
+		}
+	}
+
+	private JPanel createClientInfoPanel() {
+		JPanel panel = new JPanel(new BorderLayout(10, 10));
+		panel.setBackground(Color.WHITE);
+		panel.setBorder(createTitledBorder("Klienta informācija"));
+
+		JPanel clientActionsPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 10));
+		clientActionsPanel.setBackground(Color.WHITE);
+
+		klientuSarakstsComboBox = new JComboBox<>();
+		loadClientList();
+
+		JButton loadClientBtn = new JButton("Ielādēt datus");
+		loadClientBtn.setFont(new Font("Segoe UI", Font.BOLD, 14));
+		setupButton(loadClientBtn, new Color(220, 220, 220), new Color(255, 230, 150));
+		loadClientBtn.addActionListener(e -> loadClientData());
+
+		JButton deleteClientBtn = new JButton("🗑️ Izdzēst klientu");
+		deleteClientBtn.setFont(new Font("Segoe UI", Font.BOLD, 14));
+		setupButton(deleteClientBtn, new Color(220, 220, 220), new Color(255, 204, 204));
+		deleteClientBtn.addActionListener(e -> deleteClientFile());
+
+		clientActionsPanel.add(new JLabel("Izvēlēties klientu:"));
+		clientActionsPanel.add(klientuSarakstsComboBox);
+		clientActionsPanel.add(loadClientBtn);
+		clientActionsPanel.add(deleteClientBtn);
+
+		JPanel clientInfoFields = new JPanel(new GridLayout(5, 2, 10, 10));
+		clientInfoFields.setBackground(Color.WHITE);
+		clientInfoFields.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+		vardsUzvardsField = new JTextField();
+		personasKodsField = new JTextField();
+		pilniGadiField = new JTextField();
+		pilniGadiField.setEditable(false);
+		iestajiesSACField = new JTextField();
+
+		String[] invaliditatesGrupas = { "", "1. invaliditātes grupa", "2. invaliditātes grupa",
+				"3. invaliditātes grupa" };
+		invaliditatesGrupaComboBox = new JComboBox<>(invaliditatesGrupas);
+
+		vardsUzvardsField.addKeyListener(new FocusOnEnterListener(personasKodsField));
+		personasKodsField.addKeyListener(new FocusOnEnterListener(invaliditatesGrupaComboBox));
+		invaliditatesGrupaComboBox.addKeyListener(new FocusOnEnterListener(iestajiesSACField));
+		iestajiesSACField.addKeyListener(new FocusOnEnterListener(gimenesArstsComboBox));
+
+		personasKodsField.addFocusListener(new FocusAdapter() {
+			@Override
+			public void focusLost(FocusEvent e) {
+				validatePersonasKods();
+				calculateAgeFromPersonalCode();
+				checkFormValidity();
+			}
+		});
+
+		iestajiesSACField.addFocusListener(new FocusAdapter() {
+			@Override
+			public void focusLost(FocusEvent e) {
+				validateDate();
+				checkFormValidity();
+			}
+		});
+
+		clientInfoFields.add(new JLabel("Klienta vārds un uzvārds:"));
+		clientInfoFields.add(vardsUzvardsField);
+		clientInfoFields.add(new JLabel("Personas kods:"));
+		clientInfoFields.add(personasKodsField);
+		clientInfoFields.add(new JLabel("Pilni gadi:"));
+		clientInfoFields.add(pilniGadiField);
+		clientInfoFields.add(new JLabel("Invaliditātes grupa:"));
+		clientInfoFields.add(invaliditatesGrupaComboBox);
+		clientInfoFields.add(new JLabel("Iestājies SAC:"));
+		clientInfoFields.add(iestajiesSACField);
+
+		panel.add(clientActionsPanel, BorderLayout.NORTH);
+		panel.add(clientInfoFields, BorderLayout.CENTER);
+		return panel;
+	}
+
+	private JPanel createDoctorsPanel() {
+		JPanel panel = new JPanel(new GridLayout(2, 1, 10, 10));
+		panel.setBackground(Color.WHITE);
+		panel.setBorder(createTitledBorder("Ārstu izvēle"));
+
+		// Ģimenes ārsti
+		JPanel gimenesArstsRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 5));
+		gimenesArstsRow.setBackground(Color.WHITE);
+		gimenesArstsRow.add(new JLabel("Ģimenes ārsts:"));
+
+		Vector<String> gimenesArsti = loadList(GIMENES_ARSTI_FILE.toFile());
+		gimenesArstsComboBox = new JComboBox<>(gimenesArsti);
+		gimenesArstsComboBox.setPreferredSize(new Dimension(300, 30));
+
+		JButton addGimenesArstsBtn = new JButton("Pievienot");
+		setupButton(addGimenesArstsBtn, new Color(220, 220, 220), new Color(255, 230, 150));
+		addGimenesArstsBtn.addActionListener(
+				e -> addNewItemToList(gimenesArstsComboBox, GIMENES_ARSTI_FILE.toFile(), "Ģimenes ārstu"));
+
+		JButton deleteGimenesArstsBtn = new JButton("Dzēst");
+		setupButton(deleteGimenesArstsBtn, new Color(220, 220, 220), new Color(255, 204, 204));
+		deleteGimenesArstsBtn.addActionListener(
+				e -> deleteItemFromList(gimenesArstsComboBox, GIMENES_ARSTI_FILE.toFile(), "Ģimenes ārstu"));
+
+		gimenesArstsRow.add(gimenesArstsComboBox);
+		gimenesArstsRow.add(addGimenesArstsBtn);
+		gimenesArstsRow.add(deleteGimenesArstsBtn);
+
+		// Ārsti-psihiatri
+		JPanel psihiatrsRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 5));
+		psihiatrsRow.setBackground(Color.WHITE);
+		psihiatrsRow.add(new JLabel("Ārsts-psihiatrs:"));
+
+		Vector<String> psihiatri = loadList(PSIHIATRI_FILE.toFile());
+		psihiatrsComboBox = new JComboBox<>(psihiatri);
+		psihiatrsComboBox.setPreferredSize(new Dimension(300, 30));
+
+		JButton addPsihiatrsBtn = new JButton("Pievienot");
+		setupButton(addPsihiatrsBtn, new Color(220, 220, 220), new Color(255, 230, 150));
+		addPsihiatrsBtn.addActionListener(
+				e -> addNewItemToList(psihiatrsComboBox, PSIHIATRI_FILE.toFile(), "Ārstu-psihiatru"));
+
+		JButton deletePsihiatrsBtn = new JButton("Dzēst");
+		setupButton(deletePsihiatrsBtn, new Color(220, 220, 220), new Color(255, 204, 204));
+		deletePsihiatrsBtn.addActionListener(
+				e -> deleteItemFromList(psihiatrsComboBox, PSIHIATRI_FILE.toFile(), "Ārstu-psihiatru"));
+
+		psihiatrsRow.add(psihiatrsComboBox);
+		psihiatrsRow.add(addPsihiatrsBtn);
+		psihiatrsRow.add(deletePsihiatrsBtn);
+
+		gimenesArstsComboBox.addKeyListener(new FocusOnEnterListener(psihiatrsComboBox));
+
+		panel.add(gimenesArstsRow);
+		panel.add(psihiatrsRow);
+
+		return panel;
+	}
+
+	private JPanel createMedikamentiPanel() {
+		JPanel panel = new JPanel(new BorderLayout(10, 10));
+		panel.setBackground(Color.WHITE);
+		panel.setBorder(createTitledBorder("Medikamenti"));
+
+		JPanel medikamentiForm = new JPanel(new GridLayout(13, 1, 10, 5));
+		medikamentiForm.setBackground(Color.WHITE);
+
+		medikamentiList = loadList(MEDIKAMENTI_FILE.toFile());
+
+		JPanel medikamentControls = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 5));
+		medikamentControls.setBackground(Color.WHITE);
+
+		JButton addMedikamentsBtn = new JButton("Pievienot jaunu medikamentu");
+		addMedikamentsBtn.setFont(new Font("Segoe UI", Font.BOLD, 14));
+		setupButton(addMedikamentsBtn, new Color(220, 220, 220), new Color(255, 230, 150));
+		addMedikamentsBtn.addActionListener(e -> addNewMedikamentToList());
+
+		medikamentControls.add(addMedikamentsBtn);
+
+		medikamentiForm.add(medikamentControls);
+
+		medikamentuComboBoxes = new ComboBoxWithSearch[12];
+		for (int i = 0; i < 12; i++) {
+			final int index = i;
+			JPanel medikamentRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+			medikamentRow.setBackground(Color.WHITE);
+
+			JLabel label = new JLabel("Medikaments " + (i + 1) + ":");
+			medikamentRow.add(label);
+
+			medikamentuComboBoxes[index] = new ComboBoxWithSearch(medikamentiList);
+			medikamentuComboBoxes[index].setPreferredSize(new Dimension(300, 30));
+			medikamentRow.add(medikamentuComboBoxes[index]);
+
+			JButton editMedikamentsBtn = new JButton("✏️ Labot");
+			setupButton(editMedikamentsBtn, new Color(220, 220, 220), new Color(255, 230, 150));
+			editMedikamentsBtn.addActionListener(e -> editMedikamentFromList(medikamentuComboBoxes[index]));
+			medikamentRow.add(editMedikamentsBtn);
+
+			JButton deleteMedikamentsBtn = new JButton("🗑️ Dzēst");
+			setupButton(deleteMedikamentsBtn, new Color(220, 220, 220), new Color(255, 204, 204));
+			deleteMedikamentsBtn.addActionListener(e -> deleteMedikamentFromList(medikamentuComboBoxes[index]));
+			medikamentRow.add(deleteMedikamentsBtn);
+
+			if (index < 11) {
+				medikamentuComboBoxes[index].addKeyListener(new FocusOnEnterListener(medikamentuComboBoxes[index + 1]));
+			}
+			medikamentiForm.add(medikamentRow);
+		}
+
+		medikamentuComboBoxes[11].addKeyListener(new FocusOnEnterListener(saveButton));
+
+		panel.add(medikamentiForm, BorderLayout.CENTER);
+		return panel;
+	}
+
+	private Border createTitledBorder(String title) {
+		return BorderFactory.createTitledBorder(BorderFactory.createLineBorder(new Color(200, 200, 200)), title, 0, 2,
+				new Font("Segoe UI", Font.BOLD, 18), new Color(50, 50, 50));
+	}
+
+	private void addValidationListeners() {
+		vardsUzvardsField.setBackground(mandatoryFieldColor);
+		personasKodsField.setBackground(mandatoryFieldColor);
+
+		vardsUzvardsField.setToolTipText("Šis lauks ir obligāti jāaizpilda.");
+		personasKodsField.setToolTipText("Šis lauks ir obligāti jāaizpilda.");
+		iestajiesSACField.setToolTipText("Ievadiet datumu formātā 'dd.MM.yyyy'.");
+
+		DocumentListener documentListener = new DocumentListener() {
+			public void insertUpdate(DocumentEvent e) {
+				checkFormValidity();
+			}
+
+			public void removeUpdate(DocumentEvent e) {
+				checkFormValidity();
+			}
+
+			public void changedUpdate(DocumentEvent e) {
+				checkFormValidity();
+			}
+		};
+
+		vardsUzvardsField.getDocument().addDocumentListener(documentListener);
+		personasKodsField.getDocument().addDocumentListener(documentListener);
+		iestajiesSACField.getDocument().addDocumentListener(documentListener);
+	}
+
+	private void checkFormValidity() {
+		boolean isVardsUzvardsValid = !vardsUzvardsField.getText().trim().isEmpty();
+		boolean isPersonasKodsValid = personasKodsPattern.matcher(personasKodsField.getText().trim()).matches();
+		boolean isIestajiesSACValid = validateDate(false);
+
+		vardsUzvardsField.setBackground(isVardsUzvardsValid ? Color.WHITE : mandatoryFieldColor);
+		personasKodsField.setBackground(isPersonasKodsValid ? Color.WHITE : mandatoryFieldColor);
+		iestajiesSACField
+				.setBackground(isIestajiesSACValid || iestajiesSACField.getText().isEmpty() ? Color.WHITE : errorColor);
+
+		saveButton.setEnabled(isVardsUzvardsValid && isPersonasKodsValid && isIestajiesSACValid);
+	}
+
+	private boolean validateDate(boolean showError) {
+		String dateText = iestajiesSACField.getText().trim();
+		if (dateText.isEmpty()) {
+			if (showError) {
+				showStatus("Datuma lauks ir tukšs, lūdzu ievadiet datumu.", true);
+			}
+			return true;
+		}
+
+		try {
+			DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy");
+			LocalDate.parse(dateText, formatter);
+			showStatus("Gatavs.", false);
+			return true;
+		} catch (DateTimeParseException e) {
+			if (showError) {
+				Toolkit.getDefaultToolkit().beep();
+				showStatus("Kļūda: Ievadiet derīgu datumu formātā 'dd.MM.yyyy'.", true);
+			}
+			return false;
+		}
+	}
+
+	private void validateDate() {
+		String dateText = iestajiesSACField.getText().trim();
+		if (!dateText.isEmpty()) {
+			try {
+				DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy");
+				LocalDate.parse(dateText, formatter);
+				iestajiesSACField.setBackground(Color.WHITE);
+				showStatus("Gatavs.", false);
+			} catch (DateTimeParseException e) {
+				iestajiesSACField.setBackground(errorColor);
+				Toolkit.getDefaultToolkit().beep();
+				showStatus("Kļūda: Ievadiet derīgu datumu formātā 'dd.MM.yyyy'.", true);
+			}
+		} else {
+			iestajiesSACField.setBackground(Color.WHITE);
+		}
+	}
+
+	private void validatePersonasKods() {
+		String pk = personasKodsField.getText().trim();
+		if (!pk.isEmpty() && !personasKodsPattern.matcher(pk).matches()) {
+			personasKodsField.setBackground(errorColor);
+			Toolkit.getDefaultToolkit().beep();
+			showStatus("Kļūda: Personas koda formāts nav pareizs. Jābūt 'ddmmyy-xxxxx'.", true);
+		} else {
+			personasKodsField.setBackground(Color.WHITE);
+			showStatus("Gatavs.", false);
+		}
+	}
+
+	private void showStatus(String message, boolean isError) {
+		statusBar.setText((isError ? "⚠️ " : "✅ ") + message);
+		statusBar.setForeground(isError ? new Color(180, 0, 0) : new Color(0, 102, 0));
+
+		if (isError) {
+			Timer timer = new Timer(5000, e -> {
+				statusBar.setText("Gatavs.");
+				statusBar.setForeground(Color.BLACK);
+			});
+			timer.setRepeats(false);
+			timer.start();
+		}
+	}
+
+	private void calculateAgeFromPersonalCode() {
+		String pk = personasKodsField.getText().trim();
+		if (personasKodsPattern.matcher(pk).matches()) {
+			try {
+				String datePart = pk.substring(0, 6);
+				DateTimeFormatter formatter = DateTimeFormatter.ofPattern("ddMMyy");
+				LocalDate birthDate = LocalDate.parse(datePart, formatter);
+
+				if (birthDate.isAfter(LocalDate.now())) {
+					birthDate = birthDate.minusYears(100);
+				}
+
+				long years = ChronoUnit.YEARS.between(birthDate, LocalDate.now());
+				pilniGadiField.setText(String.valueOf(years));
+			} catch (Exception e) {
+				pilniGadiField.setText("Kļūda");
+			}
+		} else {
+			pilniGadiField.setText("");
+		}
+	}
+
+	private void loadClientList() {
+		try {
+			Files.createDirectories(OUTPUT_DIRECTORY);
+			File outputDir = OUTPUT_DIRECTORY.toFile();
+			File[] files = outputDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".xlsx"));
+			klientuSarakstsComboBox.removeAllItems();
+			klientuSarakstsComboBox.addItem("");
+			if (files != null) {
+				for (File file : files) {
+					klientuSarakstsComboBox.addItem(file.getName());
+				}
+			}
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}
+
+	private void deleteClientFile() {
+		String selectedFile = (String) klientuSarakstsComboBox.getSelectedItem();
+		if (selectedFile == null || selectedFile.isEmpty()) {
+			JOptionPane.showMessageDialog(this, "Lūdzu, izvēlieties klientu, kuru vēlaties dzēst.", "Dzēšanas kļūda",
+					JOptionPane.ERROR_MESSAGE);
+			return;
+		}
+
+		int response = JOptionPane.showConfirmDialog(this,
+				"Vai tiešām vēlaties neatgriezeniski izdzēst klientu '" + selectedFile + "'?", "Apstiprināt dzēšanu",
+				JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+
+		if (response == JOptionPane.YES_OPTION) {
+			try {
+				Path filePath = OUTPUT_DIRECTORY.resolve(selectedFile);
+				Files.deleteIfExists(filePath);
+				loadClientList();
+				showStatus("Klients '" + selectedFile + "' veiksmīgi izdzēsts.", false);
+			} catch (IOException ex) {
+				showStatus("Kļūda dzēšot failu: " + ex.getMessage(), true);
+				ex.printStackTrace();
+			}
+		}
+	}
+
+	private void loadClientData() {
+		String selectedFile = (String) klientuSarakstsComboBox.getSelectedItem();
+		if (selectedFile == null || selectedFile.isEmpty()) {
+			return;
+		}
+
+		try (FileInputStream fis = new FileInputStream(OUTPUT_DIRECTORY.resolve(selectedFile).toFile());
+				XSSFWorkbook workbook = new XSSFWorkbook(fis)) {
+
+			Sheet sheet = workbook.getSheet("Hospitalizacija");
+			if (sheet == null) {
+				showStatus("Lapa 'Hospitalizacija' netika atrasta failā.", true);
+				return;
+			}
+
+			vardsUzvardsField.setText(getCellValue(sheet, "B5"));
+			personasKodsField.setText(getCellValue(sheet, "C5"));
+			pilniGadiField.setText(getCellValue(sheet, "D5"));
+			invaliditatesGrupaComboBox.setSelectedItem(getCellValue(sheet, "C7"));
+			iestajiesSACField.setText(getCellValue(sheet, "C1"));
+			gimenesArstsComboBox.setSelectedItem(getCellValue(sheet, "A9"));
+			psihiatrsComboBox.setSelectedItem(getCellValue(sheet, "C9"));
+
+			String[] medikamentuCells = { "A32", "A33", "A34", "A35", "A36", "A37", "C32", "C33", "C34", "C35", "C36",
+					"C37" };
+			for (int i = 0; i < medikamentuComboBoxes.length; i++) {
+				medikamentuComboBoxes[i].setSelectedItem(getCellValue(sheet, medikamentuCells[i]));
+			}
+
+			showStatus("Dati veiksmīgi ielādēti.", false);
+			checkFormValidity();
+		} catch (Exception ex) {
+			showStatus("Kļūda datu ielādes laikā: " + ex.getMessage(), true);
+			ex.printStackTrace();
+		}
+	}
+
+	private String getCellValue(Sheet sheet, String cellAddress) {
+		CellReference cr = new CellReference(cellAddress);
+		Row row = sheet.getRow(cr.getRow());
+		if (row != null) {
+			Cell cell = row.getCell(cr.getCol());
+			if (cell != null) {
+				if (cell.getCellType() == CellType.NUMERIC) {
+					return String.valueOf((int) cell.getNumericCellValue());
+				} else {
+					return cell.getStringCellValue();
+				}
+			}
+		}
+		return "";
+	}
+
+	private Vector<String> loadList(File file) {
+		Vector<String> list = new Vector<>();
+		Set<String> seenItems = new HashSet<>();
+		list.add("");
+		seenItems.add("");
+
+		// Lasām no faila darbvirsmas direktorijā
+		if (file.exists()) {
+			try (BufferedReader br = new BufferedReader(new FileReader(file))) {
+				String line;
+				while ((line = br.readLine()) != null) {
+					String trimmedLine = line.trim();
+					if (!trimmedLine.isEmpty() && seenItems.add(trimmedLine.toLowerCase())) {
+						list.add(trimmedLine);
+					}
+				}
+			} catch (IOException e) {
+				System.err.println("Kļūda lasot failu: " + file.getName());
+				e.printStackTrace();
+			}
+		}
+		Collections.sort(list, String.CASE_INSENSITIVE_ORDER);
+		return list;
+	}
+
+	private void addNewItemToList(JComboBox<String> comboBox, File file, String itemType) {
+		String newItem = JOptionPane.showInputDialog(this, "Ievadiet jaunu " + itemType + ":");
+		if (newItem != null && !newItem.trim().isEmpty()) {
+			if (!comboBoxContains(comboBox, newItem)) {
+				comboBox.addItem(newItem);
+				saveList(comboBox, file);
+				comboBox.setSelectedItem(newItem);
+				showStatus(itemType + " '" + newItem + "' veiksmīgi pievienots.", false);
+			} else {
+				Toolkit.getDefaultToolkit().beep();
+				showStatus("Šāds " + itemType + " jau eksistē.", true);
+			}
+		}
+	}
+
+	private void deleteItemFromList(JComboBox<String> comboBox, File file, String itemType) {
+		String selectedItem = (String) comboBox.getSelectedItem();
+		if (selectedItem == null || selectedItem.isEmpty()) {
+			JOptionPane.showMessageDialog(this,
+					"Lūdzu, izvēlieties " + itemType.toLowerCase() + ", kuru vēlaties dzēst.", "Dzēšanas kļūda",
+					JOptionPane.ERROR_MESSAGE);
+			return;
+		}
+
+		int response = JOptionPane.showConfirmDialog(this,
+				"Vai tiešām vēlaties izdzēst '" + selectedItem + "' no saraksta?", "Apstiprināt dzēšanu",
+				JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+
+		if (response == JOptionPane.YES_OPTION) {
+			Vector<String> list = new Vector<>();
+			for (int i = 0; i < comboBox.getItemCount(); i++) {
+				list.add(comboBox.getItemAt(i));
+			}
+			list.remove(selectedItem);
+			saveList(list, file);
+
+			Vector<String> newItems = loadList(file);
+			comboBox.setModel(new DefaultComboBoxModel<>(newItems));
+
+			showStatus("Ieraksts '" + selectedItem + "' veiksmīgi izdzēsts.", false);
+		}
+	}
+
+	private void addNewMedikamentToList() {
+		String newItem = JOptionPane.showInputDialog(this, "Ievadiet jaunu medikamentu:");
+		if (newItem != null && !newItem.trim().isEmpty()) {
+			boolean exists = medikamentiList.stream().anyMatch(item -> item.equalsIgnoreCase(newItem.trim()));
+
+			if (!exists) {
+				medikamentiList.add(newItem.trim());
+				Collections.sort(medikamentiList, String.CASE_INSENSITIVE_ORDER);
+				saveList(medikamentiList, MEDIKAMENTI_FILE.toFile());
+				for (ComboBoxWithSearch comboBox : medikamentuComboBoxes) {
+					comboBox.refreshModel();
+				}
+				showStatus("Jauns medikaments pievienots sarakstam.", false);
+			} else {
+				Toolkit.getDefaultToolkit().beep();
+				showStatus("Šāds medikaments jau eksistē.", true);
+			}
+		}
+	}
+
+	private void editMedikamentFromList(ComboBoxWithSearch comboBox) {
+		String selectedItem = (String) comboBox.getSelectedItem();
+		if (selectedItem == null || selectedItem.isEmpty()) {
+			JOptionPane.showMessageDialog(this, "Lūdzu, izvēlieties medikamentu, kuru vēlaties labot.",
+					"Labošanas kļūda", JOptionPane.ERROR_MESSAGE);
+			return;
+		}
+
+		String editedItem = JOptionPane.showInputDialog(this, "Rediģēt medikamentu:", selectedItem);
+		if (editedItem != null && !editedItem.trim().isEmpty()) {
+			String trimmedEditedItem = editedItem.trim();
+
+			if (trimmedEditedItem.equalsIgnoreCase(selectedItem)) {
+				return;
+			}
+
+			boolean exists = medikamentiList.stream().anyMatch(item -> item.equalsIgnoreCase(trimmedEditedItem));
+			if (exists) {
+				Toolkit.getDefaultToolkit().beep();
+				showStatus("Kļūda: Šāds medikaments jau eksistē.", true);
+				return;
+			}
+
+			int index = medikamentiList.indexOf(selectedItem);
+			if (index != -1) {
+				medikamentiList.set(index, trimmedEditedItem);
+				Collections.sort(medikamentiList, String.CASE_INSENSITIVE_ORDER);
+				saveList(medikamentiList, MEDIKAMENTI_FILE.toFile());
+
+				for (ComboBoxWithSearch combo : medikamentuComboBoxes) {
+					combo.refreshModel();
+				}
+
+				comboBox.setSelectedItem(trimmedEditedItem);
+				showStatus("Medikaments '" + selectedItem + "' veiksmīgi labots uz '" + trimmedEditedItem + "'.",
+						false);
+			}
+		}
+	}
+
+	private void deleteMedikamentFromList(ComboBoxWithSearch comboBox) {
+		String selectedItem = (String) comboBox.getSelectedItem();
+		if (selectedItem == null || selectedItem.isEmpty()) {
+			JOptionPane.showMessageDialog(this, "Lūdzu, izvēlieties medikamentu, kuru vēlaties dzēst.",
+					"Dzēšanas kļūda", JOptionPane.ERROR_MESSAGE);
+			return;
+		}
+
+		int response = JOptionPane.showConfirmDialog(this,
+				"Vai tiešām vēlaties izdzēst '" + selectedItem + "' no saraksta?", "Apstiprināt dzēšanu",
+				JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+
+		if (response == JOptionPane.YES_OPTION) {
+			medikamentiList.remove(selectedItem);
+			saveList(medikamentiList, MEDIKAMENTI_FILE.toFile());
+
+			for (ComboBoxWithSearch combo : medikamentuComboBoxes) {
+				combo.refreshModel();
+				if (combo.getSelectedItem() != null && combo.getSelectedItem().equals(selectedItem)) {
+					combo.setSelectedItem("");
+				}
+			}
+
+			showStatus("Medikaments '" + selectedItem + "' veiksmīgi izdzēsts.", false);
+		}
+	}
+
+	private boolean comboBoxContains(JComboBox<String> comboBox, String item) {
+		for (int i = 0; i < comboBox.getItemCount(); i++) {
+			if (comboBox.getItemAt(i).equalsIgnoreCase(item.trim())) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private void saveList(JComboBox<String> comboBox, File file) {
+		try (BufferedWriter bw = new BufferedWriter(new FileWriter(file))) {
+			for (int i = 0; i < comboBox.getItemCount(); i++) {
+				String item = comboBox.getItemAt(i);
+				if (!item.isEmpty()) {
+					bw.write(item);
+					bw.newLine();
+				}
+			}
+		} catch (IOException e) {
+			showStatus("Neizdevās saglabāt datus: " + file.getName(), true);
+			e.printStackTrace();
+		}
+	}
+
+	private void saveList(Vector<String> list, File file) {
+		try (BufferedWriter bw = new BufferedWriter(new FileWriter(file))) {
+			for (String item : list) {
+				if (!item.isEmpty()) {
+					bw.write(item);
+					bw.newLine();
+				}
+			}
+		} catch (IOException e) {
+			showStatus("Neizdevās saglabāt datus: " + file.getName(), true);
+			e.printStackTrace();
+		}
+	}
+
+	private void clearForm() {
+		vardsUzvardsField.setText("");
+		personasKodsField.setText("");
+		pilniGadiField.setText("");
+		invaliditatesGrupaComboBox.setSelectedIndex(0);
+		iestajiesSACField.setText("");
+		gimenesArstsComboBox.setSelectedIndex(0);
+		psihiatrsComboBox.setSelectedIndex(0);
+		for (ComboBoxWithSearch comboBox : medikamentuComboBoxes) {
+			comboBox.setSelectedItem("");
+		}
+		checkFormValidity();
+		showStatus("Gatavs.", false);
+	}
+
+	private class SaveActionListener implements ActionListener {
+		@Override
+		public void actionPerformed(ActionEvent e) {
+			try {
+				if (!saveButton.isEnabled()) {
+					Toolkit.getDefaultToolkit().beep();
+					showStatus("Lūdzu aizpildiet visus obligātos laukus, pirms saglabāšanas.", true);
+					return;
+				}
+
+				Files.createDirectories(OUTPUT_DIRECTORY);
+				String fileName = vardsUzvardsField.getText().replaceAll("\\s+", "_") + "_"
+						+ personasKodsField.getText().replaceAll("\\s+", "_") + "_veidlapa.xlsx";
+				try (FileInputStream fis = new FileInputStream(EXCEL_TEMPLATE_PATH.toFile());
+						XSSFWorkbook workbook = new XSSFWorkbook(fis);
+						FileOutputStream fos = new FileOutputStream(OUTPUT_DIRECTORY.resolve(fileName).toFile())) {
+
+					Sheet sheet = workbook.getSheet("Hospitalizacija");
+					if (sheet == null) {
+						throw new IllegalArgumentException("Lapa 'Hospitalizacija' netika atrasta.");
+					}
+
+					setCellValue(sheet, "B5", vardsUzvardsField.getText());
+					setCellValue(sheet, "C5", personasKodsField.getText());
+					setCellValue(sheet, "D5", pilniGadiField.getText());
+					setCellValue(sheet, "C7", (String) invaliditatesGrupaComboBox.getSelectedItem());
+					setCellValue(sheet, "C1", iestajiesSACField.getText());
+					setCellValue(sheet, "A9", (String) gimenesArstsComboBox.getSelectedItem());
+					setCellValue(sheet, "C9", (String) psihiatrsComboBox.getSelectedItem());
+					String[] medikamentuCells = { "A32", "A33", "A34", "A35", "A36", "A37", "C32", "C33", "C34", "C35",
+							"C36", "C37" };
+					for (int i = 0; i < medikamentuComboBoxes.length; i++) {
+						setCellValue(sheet, medikamentuCells[i], (String) medikamentuComboBoxes[i].getSelectedItem());
+					}
+
+					workbook.write(fos);
+				}
+
+				showStatus("Veidlapa veiksmīgi saglabāta: " + fileName, false);
+				int choice = JOptionPane.showConfirmDialog(MedicinasVeidlapa.this, "Saglabāts! Vai notīrīt formu?",
+						"Tīrīt formu?", JOptionPane.YES_NO_OPTION);
+				if (choice == JOptionPane.YES_OPTION) {
+					clearForm();
+				}
+				loadClientList();
+
+			} catch (Exception ex) {
+				showStatus("Kļūda saglabāšanas laikā: " + ex.getMessage(), true);
+				ex.printStackTrace();
+			}
+		}
+
+		private void setCellValue(Sheet sheet, String cellAddress, String value) {
+			CellReference cr = new CellReference(cellAddress);
+			Row row = sheet.getRow(cr.getRow());
+			if (row == null) {
+				row = sheet.createRow(cr.getRow());
+			}
+			Cell cell = row.getCell(cr.getCol());
+			if (cell == null) {
+				cell = row.createCell(cr.getCol());
+			}
+			cell.setCellValue(value);
+		}
+	}
+
+	private class ViewActionListener implements ActionListener {
+		@Override
+		public void actionPerformed(ActionEvent e) {
+			String selectedFile = (String) klientuSarakstsComboBox.getSelectedItem();
+			if (selectedFile == null || selectedFile.isEmpty()) {
+				Toolkit.getDefaultToolkit().beep();
+				showStatus("Lūdzu, izvēlieties klientu, lai apskatītu veidlapu.", true);
+				return;
+			}
+
+			File file = OUTPUT_DIRECTORY.resolve(selectedFile).toFile();
+			if (file.exists()) {
+				try {
+					Desktop.getDesktop().open(file);
+				} catch (IOException ex) {
+					showStatus("Kļūda atverot failu: " + ex.getMessage(), true);
+				}
+			} else {
+				showStatus("Fails netika atrasts.", true);
+			}
+		}
+	}
+
+	private class PrintActionListener implements ActionListener {
+		@Override
+		public void actionPerformed(ActionEvent e) {
+			String selectedFile = (String) klientuSarakstsComboBox.getSelectedItem();
+			if (selectedFile == null || selectedFile.isEmpty()) {
+				Toolkit.getDefaultToolkit().beep();
+				showStatus("Lūdzu, izvēlieties klientu, lai drukātu veidlapu.", true);
+				return;
+			}
+
+			File file = OUTPUT_DIRECTORY.resolve(selectedFile).toFile();
+			if (file.exists()) {
+				try {
+					Desktop.getDesktop().print(file);
+				} catch (IOException ex) {
+					showStatus("Kļūda drukāšanas laikā: " + ex.getMessage(), true);
+				}
+			} else {
+				showStatus("Fails netika atrasts.", true);
+			}
+		}
+	}
+
+	private class ComboBoxWithSearch extends JComboBox<String> {
+		private final Vector<String> sharedItems;
+		private final JTextComponent editor;
+		private boolean isUpdatingModel = false;
+		private boolean isProgrammaticSelection = false;
+
+		public ComboBoxWithSearch(Vector<String> sharedItems) {
+			super(new DefaultComboBoxModel<>(sharedItems));
+			this.sharedItems = sharedItems;
+			setEditable(true);
+			this.editor = (JTextComponent) getEditor().getEditorComponent();
+
+			editor.getDocument().addDocumentListener(new DocumentListener() {
+				public void insertUpdate(DocumentEvent e) {
+					if (!isUpdatingModel) {
+						SwingUtilities.invokeLater(() -> filterItems(editor.getText()));
+					}
+				}
+
+				public void removeUpdate(DocumentEvent e) {
+					if (!isUpdatingModel) {
+						SwingUtilities.invokeLater(() -> filterItems(editor.getText()));
+					}
+				}
+
+				public void changedUpdate(DocumentEvent e) {
+				}
+			});
+			editor.addKeyListener(new KeyAdapter() {
+				@Override
+				public void keyPressed(KeyEvent e) {
+					if (e.getKeyCode() == KeyEvent.VK_ENTER) {
+						Object selected = getSelectedItem();
+						if (selected != null && !selected.toString().isEmpty()) {
+							editor.setText(selected.toString());
+						}
+						setPopupVisible(false);
+						transferFocus();
+					} else if (e.getKeyCode() == KeyEvent.VK_ESCAPE) {
+						setPopupVisible(false);
+					}
+				}
+			});
+			editor.addFocusListener(new FocusAdapter() {
+				@Override
+				public void focusLost(FocusEvent e) {
+					if (!isProgrammaticSelection) {
+						String currentText = editor.getText().trim();
+						boolean found = sharedItems.stream().anyMatch(item -> item.equalsIgnoreCase(currentText));
+
+						if (currentText.isEmpty()) {
+							setSelectedItem("");
+						} else if (!found) {
+							editor.setText("");
+							setSelectedItem("");
+						} else {
+							sharedItems.stream().filter(item -> item.equalsIgnoreCase(currentText)).findFirst()
+									.ifPresent(item -> editor.setText(item));
+						}
+					}
+					setPopupVisible(false);
+				}
+
+				@Override
+				public void focusGained(FocusEvent e) {
+					setPopupVisible(true);
+				}
+			});
+		}
+
+		private void filterItems(String filterText) {
+			String lowercaseFilter = filterText.toLowerCase();
+			Vector<String> filteredItems = sharedItems.stream()
+					.filter(item -> item.toLowerCase().contains(lowercaseFilter))
+					.collect(Collectors.toCollection(Vector::new));
+
+			isUpdatingModel = true;
+			DefaultComboBoxModel<String> model = new DefaultComboBoxModel<>(filteredItems);
+			setModel(model);
+			editor.setText(filterText);
+			isUpdatingModel = false;
+
+			if (!filterText.isEmpty()) {
+				setPopupVisible(true);
+			}
+		}
+
+		public void refreshModel() {
+			isUpdatingModel = true;
+			Collections.sort(sharedItems, String.CASE_INSENSITIVE_ORDER); // Pārliecināmies, ka saraksts ir sakārtots
+			DefaultComboBoxModel<String> newModel = new DefaultComboBoxModel<>(sharedItems);
+			setModel(newModel);
+			isUpdatingModel = false;
+		}
+
+		@Override
+		public void setSelectedItem(Object anObject) {
+			isProgrammaticSelection = true;
+			super.setSelectedItem(anObject);
+			isProgrammaticSelection = false;
+			if (anObject != null) {
+				editor.setText(anObject.toString());
+			} else {
+				editor.setText("");
+			}
+		}
+	}
+
+	private class FocusOnEnterListener extends KeyAdapter {
+		private final JComponent nextComponent;
+
+		public FocusOnEnterListener(JComponent nextComponent) {
+			this.nextComponent = nextComponent;
+		}
+
+		@Override
+		public void keyPressed(KeyEvent e) {
+			if (e.getKeyCode() == KeyEvent.VK_ENTER) {
+				if (nextComponent instanceof JComboBox) {
+					((JComboBox<?>) nextComponent).requestFocusInWindow();
+				} else {
+					nextComponent.requestFocusInWindow();
+				}
+			}
+		}
+	}
+
+	private void savePreferences() {
+		try (PrintWriter pw = new PrintWriter(new FileWriter(PREFERENCES_FILE.toFile()))) {
+			pw.println("width=" + getWidth());
+			pw.println("height=" + getHeight());
+			pw.println("x=" + getX());
+			pw.println("y=" + getY());
+		} catch (IOException e) {
+			System.err.println("Neizdevās saglabāt programmas iestatījumus.");
+		}
+	}
+
+	private void loadPreferences() {
+		File prefsFile = PREFERENCES_FILE.toFile();
+		if (prefsFile.exists()) {
+			try (BufferedReader br = new BufferedReader(new FileReader(prefsFile))) {
+				int width = -1, height = -1, x = -1, y = -1;
+				String line;
+				while ((line = br.readLine()) != null) {
+					if (line.startsWith("width=")) {
+						width = Integer.parseInt(line.substring(6));
+					} else if (line.startsWith("height=")) {
+						height = Integer.parseInt(line.substring(7));
+					} else if (line.startsWith("x=")) {
+						x = Integer.parseInt(line.substring(2));
+					} else if (line.startsWith("y=")) {
+						y = Integer.parseInt(line.substring(2));
+					}
+				}
+				if (width != -1 && height != -1) {
+					setSize(width, height);
+				} else {
+					setSize(1200, 900);
+				}
+				if (x != -1 && y != -1) {
+					setLocation(x, y);
+				} else {
+					setLocationRelativeTo(null);
+				}
+			} catch (IOException | NumberFormatException e) {
+				System.err.println("Kļūda iestatījumu ielādēšanā, izmantoti noklusējuma iestatījumi.");
+				setSize(1200, 900);
+				setLocationRelativeTo(null);
+			}
+		} else {
+			setSize(1200, 900);
+			setLocationRelativeTo(null);
+		}
+	}
+
+	public static void main(String[] args) {
+		SwingUtilities.invokeLater(() -> {
+			new MedicinasVeidlapa().setVisible(true);
+		});
+	}
+}

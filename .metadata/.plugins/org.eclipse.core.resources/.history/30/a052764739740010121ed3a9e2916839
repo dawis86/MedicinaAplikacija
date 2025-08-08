@@ -1,0 +1,15 @@
+*.jar
+desktop.ini
+
+# Ignorē Eclipse projekta failus
+.classpath
+.project
+
+# Ignorē kompilētos failus un mapes
+bin/
+
+# Ignorē visus .jar failus
+Jar faili/
+
+# Ignorē sistēmas failus
+desktop.ini

@@ -1,0 +1,10 @@
+INDEX VERSION 1.134+C:\Users\davis\Desktop\MedicinasVeidlapaProject\.metadata\.plugins\org.eclipse.jdt.core
+636820107.index
+1889482645.index
+1865797976.index
+3499674568.index
+325217678.index
+2328220534.index
+2198352440.index
+1913798135.index
+4052891826.index
